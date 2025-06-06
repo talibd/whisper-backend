@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+*.tmp
+*_subtitled.mp4
+*.srt
+*.jpg
+# Add any other files/directories you don't want to commit
