@@ -441,6 +441,7 @@ def generate_video():
             "-crf", "23",
             "-c:a", "aac",
             "-b:a", "192k",
+            "-shortest",
             ffmpeg_output_path
         ]
         app.logger.info(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
