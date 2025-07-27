@@ -283,56 +283,49 @@ def generate_video():
 
         # --- Filter Complex Construction ---
         filter_complex_parts = []
-        last_video_stream_label = "0:v"  # Main video input
-
+        last_video_stream_label = "0:v" # Initial video stream from the main input
+        
+        # B-roll Image Overlays (existing logic, adapted)
+        # This part assumes images are overlaid sequentially. If simultaneous overlays are needed,
+        # the filter graph needs to be structured differently (e.g. all overlays on "0:v").
+        # For simplicity, let's keep sequential overlay for images first.
         overlay_operations = []
 
-        # Parse words to map keyword timings
-        words_json = request.form.get('words', None)
-        words = json.loads(words_json) if words_json else []
-
-        if words:
-            # Build a list of keyword b-roll triggers with exact timing
-            for kw in keywords:
-                kw_lower = kw.lower()
-                for i, word_obj in enumerate(words):
-                    word_text = word_obj["text"].lower()
-                    if word_text == kw_lower:
-                        local_img_path = downloaded_broll_paths_by_kw.get(kw)
-                        if not local_img_path:
-                            continue
-                        if local_img_path not in broll_local_path_to_ffmpeg_idx:
-                            continue
-                        img_ffmpeg_idx = broll_local_path_to_ffmpeg_idx[local_img_path]
+        for i, segment_obj in enumerate(final_processing_segments): # Use a different name for the loop variable
+             for kw, local_img_path_val in downloaded_broll_paths_by_kw.items(): # Renamed local_img_path to avoid conflict
+                if kw.lower() in segment_obj.text.lower(): # Use segment_obj
+                     if local_img_path_val in broll_local_path_to_ffmpeg_idx:
+                        img_ffmpeg_idx = broll_local_path_to_ffmpeg_idx[local_img_path_val]
                         overlay_operations.append({
-                            "start": word_obj["start"],
-                            "end": word_obj["end"],
+                            "start": segment_obj.start, # Use segment_obj
+                            "end": segment_obj.end,     # Use segment_obj
                             "img_idx": img_ffmpeg_idx,
-                            "keyword": kw
                         })
-                        break  # Apply image b-roll only once per keyword
         
-        overlay_operations.sort(key=lambda op: op["start"])  # Ensure ordered
+        
+        overlay_operations.sort(key=lambda op: op["start"])
 
         overlay_stream_counter = 0
         overlays_were_added_to_graph = False
         if overlay_operations:
-            # Initial scaling of main video
+            # Scale initial video stream to target dimensions if not already
             filter_complex_parts.append(f"[{last_video_stream_label}]scale={target_width}:{target_height},setsar=1[v_scaled_main]")
             last_video_stream_label = "v_scaled_main"
             overlays_were_added_to_graph = True
-
             for op in overlay_operations:
-                img_input_label = f"{op['img_idx']}:v"
+                img_input_label = f"{op['img_idx']}:v" 
                 current_overlay_output_label = f"ov{overlay_stream_counter}"
-                filter_complex_parts.append(
+                
+                overlay_filter = (
                     f"[{last_video_stream_label}][{img_input_label}]"
-                    f"overlay=x=(W-w)/2:y=(H-h)/2:enable='between(t,{op['start']},{op['end']})'"
+                    f"overlay=x=(W-w)/2:y=(H-h)/2:enable='between(t,{op['start']},{op['end']})'" # W,H are main_w, main_h
                     f"[{current_overlay_output_label}]"
                 )
-                last_video_stream_label = current_overlay_output_label
+                filter_complex_parts.append(overlay_filter)
+                last_video_stream_label = current_overlay_output_label 
                 overlay_stream_counter += 1
 
+                   # If no image overlays, ensure main video is scaled
         if not overlays_were_added_to_graph and last_video_stream_label == "0:v":
             filter_complex_parts.append(f"[0:v]scale={target_width}:{target_height},setsar=1[v_scaled_main]")
             last_video_stream_label = "v_scaled_main"
@@ -341,69 +334,98 @@ def generate_video():
         broll_video_overlay_counter = 0
         for config_item in broll_video_config:
             segment_idx = config_item.get("segment_index")
-            original_filename = None
 
-            # Robust filename extraction
-            for k in config_item:
-                if "originalfilename" in k.lower().strip():
-                    original_filename = secure_filename(config_item[k])
+            app.logger.info(f"Processing config_item: {config_item}")
+            app.logger.info(f"Keys in config_item: {[repr(key) for key in config_item.keys()]}")
+
+            # Attempt to get originalFilename, being mindful of potential key issues
+            raw_original_filename = None
+            # Common variations of the key name to check, in case of subtle typos or whitespace
+            possible_keys = ["originalFilename", "originalFilename ", " originalFilename"] 
+            for key_to_try in possible_keys:
+                if key_to_try in config_item:
+                    raw_original_filename = config_item[key_to_try]
+                    app.logger.info(f"Found originalFilename using key: {repr(key_to_try)}")
                     break
+            
+            if raw_original_filename is None: # If still None after checking common variations
+                # Fallback: iterate keys if direct access failed, to catch unusual key names
+                for key, value in config_item.items():
+                    if "originalfilename" in key.lower().strip(): # Case-insensitive and whitespace-insensitive check
+                        raw_original_filename = value
+                        app.logger.info(f"Found originalFilename by iterating keys (matched '{repr(key)}'): {repr(raw_original_filename)}")
+                        break
+            app.logger.info(f"Type of raw_original_filename: {type(raw_original_filename)}")
 
-            if not original_filename or segment_idx is None or segment_idx >= len(final_processing_segments):
+            # Explicitly check if it's None or not a string
+            if raw_original_filename is None or not isinstance(raw_original_filename, str) or not raw_original_filename.strip():
+                app.logger.warning(f"Skipping b-roll: original_filename is None, not a string, or empty. Value: '{raw_original_filename}'")
+                continue
+            # Now we are more confident it's a non-empty string
+            original_filename = secure_filename(raw_original_filename)
+            app.logger.info(f"Secured original_filename: '{original_filename}'. Assigning to Segment {segment_idx}")
+            app.logger.info(f"Available b-rolls: {list(saved_broll_videos_map.keys())}")
+
+            
+            if segment_idx is None or not original_filename or not final_processing_segments or segment_idx >= len(final_processing_segments):
+                app.logger.warning(f"Skipping invalid b-roll video config item: {config_item}")
                 continue
 
             broll_video_data = saved_broll_videos_map.get(original_filename)
             if not broll_video_data:
+                app.logger.warning(f"B-roll video file '{original_filename}' not found or not processed.")
                 continue
-
-            segment = final_processing_segments[segment_idx]
+            
+            segment_to_overlay_on = final_processing_segments[segment_idx]
+            seg_start = segment_to_overlay_on.start
+            seg_end = segment_to_overlay_on.end
             broll_ffmpeg_idx = broll_video_data["ffmpeg_idx"]
             bg_color = config_item.get("background_color", default_broll_background_color)
 
             scaled_broll_label = f"scaled_broll_v{broll_video_overlay_counter}"
-            current_overlay_output_label = f"v_after_broll_vid{broll_video_overlay_counter}"
+            current_broll_output_label = f"v_after_broll_vid{broll_video_overlay_counter}"
 
-            # Scale + Pad B-roll video
+            # Scale b-roll video to target dimensions, pad with chosen color
             filter_complex_parts.append(
                 f"[{broll_ffmpeg_idx}:v]setpts=PTS-STARTPTS,"
                 f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
-                f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:color={bg_color}"
-                f"[{scaled_broll_label}]"
+                f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:color={bg_color}[{scaled_broll_label}]"
             )
-
-            # Overlay b-roll video
+             # Overlay scaled b-roll video onto the last video stream
             filter_complex_parts.append(
                 f"[{last_video_stream_label}][{scaled_broll_label}]"
-                f"overlay=0:0:enable='between(t,{segment.start},{segment.end})'"
-                f"[{current_overlay_output_label}]"
+                f"overlay=0:0:enable='between(t,{seg_start},{seg_end})'[{current_broll_output_label}]"
             )
-
-            last_video_stream_label = current_overlay_output_label
+            last_video_stream_label = current_broll_output_label
             broll_video_overlay_counter += 1
 
-        # Subtitles (applied at the very end)
+        # Subtitles
+        video_stream_for_subtitles = last_video_stream_label # This is the final video stream before subtitles
+
         final_video_out_label = "v_final"
         subtitles_filter_str = f"subtitles='{ffmpeg_srt_path}'"
         filter_complex_parts.append(
-            f"[{last_video_stream_label}]{subtitles_filter_str}[{final_video_out_label}]"
+        f"[{video_stream_for_subtitles}]{subtitles_filter_str}[{final_video_out_label}]"
         )
 
         full_filter_complex_str = ";".join(filter_complex_parts)
 
-        # FFmpeg command
+        # Build FFmpeg command
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-i", ffmpeg_input_path
         ]
-        ffmpeg_cmd.extend(ffmpeg_additional_inputs)  # Append additional -i inputs
+        ffmpeg_cmd.extend(ffmpeg_additional_inputs) # Add all -i for b-roll images and videos
+        
+
         ffmpeg_cmd += [
-            "-filter_complex", full_filter_complex_str,
-            "-map", f"[{final_video_out_label}]",
-            "-map", "0:a?",
-            "-c:v", "libx264",
-            "-preset", "medium",
-            "-crf", "23",
-            "-c:a", "aac",
-            "-b:a", "192k",
+           "-filter_complex", full_filter_complex_str,
+            "-map", f"[{final_video_out_label}]", # Map the final video output of filter_complex
+            "-map", "0:a?",                 # Map audio from the main video input
+            "-c:v", "libx264",              # Re-encode video
+            "-preset", "medium",            # Encoding speed/quality
+            "-crf", "23",                   # Constant Rate Factor (quality)
+            "-c:a", "aac",                  # Re-encode audio to AAC (common)
+            "-b:a", "192k",     
             ffmpeg_output_path
         ]
         app.logger.info(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
