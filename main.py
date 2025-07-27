@@ -295,9 +295,8 @@ def generate_video():
             # Build a list of keyword b-roll triggers with exact timing
             for kw in keywords:
                 kw_lower = kw.lower()
-                for i, word_obj in enumerate(words):
-                    word_text = word_obj["text"].lower()
-                    if word_text == kw_lower:
+                for word_obj in words:
+                    if word_obj["text"].lower() == kw_lower:
                         local_img_path = downloaded_broll_paths_by_kw.get(kw)
                         if not local_img_path:
                             continue
@@ -311,6 +310,20 @@ def generate_video():
                             "keyword": kw
                         })
                         break  # Apply image b-roll only once per keyword
+
+        # Fallback: If no word-level matches, use segment text to trigger images
+        if not overlay_operations and final_processing_segments:
+            for seg in final_processing_segments:
+                for kw, local_img_path in downloaded_broll_paths_by_kw.items():
+                    if kw.lower() in seg.text.lower() and local_img_path in broll_local_path_to_ffmpeg_idx:
+                        img_ffmpeg_idx = broll_local_path_to_ffmpeg_idx[local_img_path]
+                        overlay_operations.append({
+                            "start": seg.start,
+                            "end": seg.end,
+                            "img_idx": img_ffmpeg_idx,
+                            "keyword": kw
+                        })
+                        break
         
         overlay_operations.sort(key=lambda op: op["start"])  # Ensure ordered
 
@@ -340,7 +353,16 @@ def generate_video():
         # B-roll Video Overlays
         broll_video_overlay_counter = 0
         for config_item in broll_video_config:
+            # Support both "segment_index" (snake_case) and "segmentIndex" (camelCase)
             segment_idx = config_item.get("segment_index")
+            if segment_idx is None:
+                segment_idx = config_item.get("segmentIndex")
+
+            try:
+                segment_idx = int(segment_idx) if segment_idx is not None else None
+            except (TypeError, ValueError):
+                segment_idx = None
+
             original_filename = None
 
             # Robust filename extraction
