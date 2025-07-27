@@ -294,9 +294,18 @@ def generate_video():
         if words:
             # Build a list of keyword b-roll triggers with exact timing
             for kw in keywords:
-                kw_lower = kw.lower()
-                for word_obj in words:
-                    if word_obj["text"].lower() == kw_lower:
+                kw_tokens = re.findall(r"\b\w+\b", kw.lower())
+                if not kw_tokens:
+                    continue
+                token_count = len(kw_tokens)
+                for i in range(len(words) - token_count + 1):
+                    matched = True
+                    for j, token in enumerate(kw_tokens):
+                        word_text = re.sub(r"\W+", "", str(words[i + j].get("text", "")).lower())
+                        if word_text != token:
+                            matched = False
+                            break
+                    if matched:
                         local_img_path = downloaded_broll_paths_by_kw.get(kw)
                         if not local_img_path:
                             continue
@@ -304,8 +313,8 @@ def generate_video():
                             continue
                         img_ffmpeg_idx = broll_local_path_to_ffmpeg_idx[local_img_path]
                         overlay_operations.append({
-                            "start": word_obj["start"],
-                            "end": word_obj["end"],
+                            "start": words[i]["start"],
+                            "end": words[i + token_count - 1]["end"],
                             "img_idx": img_ffmpeg_idx,
                             "keyword": kw
                         })
