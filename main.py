@@ -340,7 +340,15 @@ def generate_video():
         # B-roll Video Overlays
         broll_video_overlay_counter = 0
         for config_item in broll_video_config:
+            # Support both "segment_index" (snake_case) and "segmentIndex" (camelCase)
             segment_idx = config_item.get("segment_index")
+            if segment_idx is None:
+                segment_idx = config_item.get("segmentIndex")
+
+            try:
+                segment_idx = int(segment_idx) if segment_idx is not None else None
+            except (TypeError, ValueError):
+                segment_idx = None
             original_filename = None
 
             # Robust filename extraction
