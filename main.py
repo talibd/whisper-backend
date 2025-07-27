@@ -132,6 +132,10 @@ def generate_video():
     output_width_req = request.form.get('output_width', type=int)
     output_height_req = request.form.get('output_height', type=int)
 
+    if not shutil.which("ffmpeg"):
+        app.logger.error("ffmpeg not found. Please install ffmpeg to generate videos.")
+        return jsonify({"error": "ffmpeg not installed"}), 500
+
 
     if not transcript_text_from_form and not transcribed_segments_json:
         return jsonify({"error": "Transcript required"}), 400
