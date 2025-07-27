@@ -261,7 +261,9 @@ def generate_video():
 
         unique_local_image_paths = sorted(list(set(downloaded_broll_paths_by_kw.values())))
         for local_path in unique_local_image_paths:
-            ffmpeg_additional_inputs.extend(["-i", local_path.replace('\\', '/')])
+            ffmpeg_additional_inputs.extend([
+                "-loop", "1", "-i", local_path.replace('\\', '/')
+            ])
             all_input_file_paths_ordered.append(local_path)
             broll_local_path_to_ffmpeg_idx[local_path] = len(all_input_file_paths_ordered) - 1
 
