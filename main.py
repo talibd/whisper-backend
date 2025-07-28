@@ -291,34 +291,14 @@ def generate_video():
         # For simplicity, let's keep sequential overlay for images first.
         overlay_operations = []
 
-        # Parse words to map keyword timings
-        words_json = request.form.get('words', None)
-        words = json.loads(words_json) if words_json else []
-
-        if words:
-            # Build a list of keyword b-roll triggers with exact timing
-            for kw in keywords:
-                kw_tokens = re.findall(r"\b\w+\b", kw.lower())
-                if not kw_tokens:
-                    continue
-                token_count = len(kw_tokens)
-                for i in range(len(words) - token_count + 1):
-                    matched = True
-                    for j, token in enumerate(kw_tokens):
-                        word_text = re.sub(r"\W+", "", str(words[i + j].get("text", "")).lower())
-                        if word_text != token:
-                            matched = False
-                            break
-                    if matched:
-                        local_img_path = downloaded_broll_paths_by_kw.get(kw)
-                        if not local_img_path:
-                            continue
-                        if local_img_path not in broll_local_path_to_ffmpeg_idx:
-                            continue
-                        img_ffmpeg_idx = broll_local_path_to_ffmpeg_idx[local_img_path]
+        for i, segment_obj in enumerate(final_processing_segments): # Use a different name for the loop variable
+             for kw, local_img_path_val in downloaded_broll_paths_by_kw.items(): # Renamed local_img_path to avoid conflict
+                if kw.lower() in segment_obj.text.lower(): # Use segment_obj
+                     if local_img_path_val in broll_local_path_to_ffmpeg_idx:
+                        img_ffmpeg_idx = broll_local_path_to_ffmpeg_idx[local_img_path_val]
                         overlay_operations.append({
-                            "start": words[i]["start"],
-                            "end": words[i + token_count - 1]["end"],
+                            "start": segment_obj.start, # Use segment_obj
+                            "end": segment_obj.end,     # Use segment_obj
                             "img_idx": img_ffmpeg_idx,
                         })
         
@@ -354,20 +334,18 @@ def generate_video():
         broll_video_overlay_counter = 0
         for config_item in broll_video_config:
             segment_idx = config_item.get("segment_index")
-            if segment_idx is None:
-                segment_idx = config_item.get("segmentIndex")
 
-            try:
-                segment_idx = int(segment_idx) if segment_idx is not None else None
-            except (TypeError, ValueError):
-                segment_idx = None
+            app.logger.info(f"Processing config_item: {config_item}")
+            app.logger.info(f"Keys in config_item: {[repr(key) for key in config_item.keys()]}")
 
-            original_filename = None
-
-            # Robust filename extraction
-            for k in config_item:
-                if "originalfilename" in k.lower().strip():
-                    original_filename = secure_filename(config_item[k])
+            # Attempt to get originalFilename, being mindful of potential key issues
+            raw_original_filename = None
+            # Common variations of the key name to check, in case of subtle typos or whitespace
+            possible_keys = ["originalFilename", "originalFilename ", " originalFilename"] 
+            for key_to_try in possible_keys:
+                if key_to_try in config_item:
+                    raw_original_filename = config_item[key_to_try]
+                    app.logger.info(f"Found originalFilename using key: {repr(key_to_try)}")
                     break
             
             if raw_original_filename is None: # If still None after checking common variations
@@ -440,15 +418,14 @@ def generate_video():
         
 
         ffmpeg_cmd += [
-            "-filter_complex", full_filter_complex_str,
-            "-map", f"[{final_video_out_label}]",
-            "-map", "0:a?",
-            "-c:v", "libx264",
-            "-preset", "medium",
-            "-crf", "23",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-shortest",
+           "-filter_complex", full_filter_complex_str,
+            "-map", f"[{final_video_out_label}]", # Map the final video output of filter_complex
+            "-map", "0:a?",                 # Map audio from the main video input
+            "-c:v", "libx264",              # Re-encode video
+            "-preset", "medium",            # Encoding speed/quality
+            "-crf", "23",                   # Constant Rate Factor (quality)
+            "-c:a", "aac",                  # Re-encode audio to AAC (common)
+            "-b:a", "192k",     
             ffmpeg_output_path
         ]
         app.logger.info(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
