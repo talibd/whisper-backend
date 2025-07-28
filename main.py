@@ -248,15 +248,14 @@ def generate_video():
         all_input_file_paths_ordered = [ffmpeg_input_path] # Main video is 0
 
         # --- B-roll Image Preparation ---
-        downloaded_broll_paths_by_kw = {} # Renamed from broll_paths for clarity in this scope
-        for kw, url in broll_images.items(): # broll_images from request: kw -> url
+        downloaded_broll_paths_by_kw = {}
+        for kw, url in broll_images.items():
             if url:
                 img_filename = f"{uuid.uuid4().hex}_{secure_filename(kw)}.jpg"
                 local_img_path = os.path.join(tempfile.gettempdir(), img_filename)
-                # Add to cleanup list as soon as path is determined, before download attempt
                 temp_files_to_clean_up.append(local_img_path)
                 if download_image(url, local_img_path):
-                    downloaded_broll_paths_by_kw[kw] = local_img_path
+                    downloaded_broll_paths_by_kw[kw.lower()] = local_img_path
         
         # The line below was moved into the loop above to prevent NameError
         # temp_files_to_clean_up.append(local_img_path) 
@@ -312,7 +311,8 @@ def generate_video():
                             matched = False
                             break
                     if matched:
-                        local_img_path = downloaded_broll_paths_by_kw.get(kw)
+                        kw_lower = kw.lower()
+                        local_img_path = downloaded_broll_paths_by_kw.get(kw_lower)
                         if not local_img_path:
                             continue
                         if local_img_path not in broll_local_path_to_ffmpeg_idx:
@@ -324,7 +324,6 @@ def generate_video():
                             "img_idx": img_ffmpeg_idx,
                             "keyword": kw
                         })
-                        break  # Apply image b-roll only once per keyword
 
         # Fallback: If no word-level matches, use segment text to trigger images
         if not overlay_operations and final_processing_segments:
