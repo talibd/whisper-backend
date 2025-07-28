@@ -114,13 +114,14 @@ def transcribe():
 def generate_video():
     file = request.files['file']
     transcript_text_from_form = request.form.get('transcript', "") # Renamed to avoid conflict
-    # words_json = request.form.get('words', None) # Will be used in fallback
+    words_json = request.form.get('words', None)  # Needed for keyword-level b-roll
     keywords_json = request.form.get('keywords', None)
     broll_images_json = request.form.get('broll_images', None)
     transcribed_segments_json = request.form.get('transcribed_segments', None)
 
     keywords = json.loads(keywords_json) if keywords_json else []
     broll_images = json.loads(broll_images_json) if broll_images_json else {}
+    words = json.loads(words_json) if words_json else []
 
      # New: B-roll video handling
     broll_video_files = request.files.getlist("broll_video_files")
@@ -162,8 +163,6 @@ def generate_video():
     # Fallback logic if final_processing_segments is still empty
     if not final_processing_segments:
         app.logger.warning("Transcribed segments not available or empty, falling back to words/text.")
-        words_json = request.form.get('words', None) # Get words for fallback
-        words = json.loads(words_json) if words_json else None
         if words and len(words) > 0:
             group_size = 7
             for i in range(0, len(words), group_size):
@@ -291,14 +290,25 @@ def generate_video():
         # For simplicity, let's keep sequential overlay for images first.
         overlay_operations = []
 
-        for i, segment_obj in enumerate(final_processing_segments): # Use a different name for the loop variable
-             for kw, local_img_path_val in downloaded_broll_paths_by_kw.items(): # Renamed local_img_path to avoid conflict
-                if kw.lower() in segment_obj.text.lower(): # Use segment_obj
-                     if local_img_path_val in broll_local_path_to_ffmpeg_idx:
+        if words:
+            for word in words:
+                w_text = str(word.get('text', ''))
+                for kw, local_img_path_val in downloaded_broll_paths_by_kw.items():
+                    if w_text.lower() == kw.lower() and local_img_path_val in broll_local_path_to_ffmpeg_idx:
                         img_ffmpeg_idx = broll_local_path_to_ffmpeg_idx[local_img_path_val]
                         overlay_operations.append({
-                            "start": segment_obj.start, # Use segment_obj
-                            "end": segment_obj.end,     # Use segment_obj
+                            "start": float(word.get('start', 0)),
+                            "end": float(word.get('end', 0)),
+                            "img_idx": img_ffmpeg_idx,
+                        })
+        else:
+            for segment_obj in final_processing_segments:
+                for kw, local_img_path_val in downloaded_broll_paths_by_kw.items():
+                    if kw.lower() in segment_obj.text.lower() and local_img_path_val in broll_local_path_to_ffmpeg_idx:
+                        img_ffmpeg_idx = broll_local_path_to_ffmpeg_idx[local_img_path_val]
+                        overlay_operations.append({
+                            "start": segment_obj.start,
+                            "end": segment_obj.end,
                             "img_idx": img_ffmpeg_idx,
                         })
         
