@@ -291,16 +291,28 @@ def generate_video():
         overlay_operations = []
 
         if words:
-            for word in words:
-                w_text = str(word.get('text', ''))
-                for kw, local_img_path_val in downloaded_broll_paths_by_kw.items():
-                    if w_text.lower() == kw.lower() and local_img_path_val in broll_local_path_to_ffmpeg_idx:
-                        img_ffmpeg_idx = broll_local_path_to_ffmpeg_idx[local_img_path_val]
-                        overlay_operations.append({
-                            "start": float(word.get('start', 0)),
-                            "end": float(word.get('end', 0)),
-                            "img_idx": img_ffmpeg_idx,
-                        })
+            for kw in keywords:
+                kw_tokens = re.findall(r"\b\w+\b", kw.lower())
+                if not kw_tokens:
+                    continue
+                token_count = len(kw_tokens)
+                for i in range(len(words) - token_count + 1):
+                    matched = True
+                    for j in range(token_count):
+                        word_text = re.sub(r"\W+", "", str(words[i + j].get("text", "")).lower())
+                        if word_text != kw_tokens[j]:
+                            matched = False
+                            break
+                    if matched:
+                        local_img_path_val = downloaded_broll_paths_by_kw.get(kw)
+                        if local_img_path_val and local_img_path_val in broll_local_path_to_ffmpeg_idx:
+                            img_ffmpeg_idx = broll_local_path_to_ffmpeg_idx[local_img_path_val]
+                            overlay_operations.append({
+                                "start": float(words[i]["start"]),
+                                "end": float(words[i + token_count - 1]["end"]),
+                                "img_idx": img_ffmpeg_idx,
+                            })
+                        break  # only overlay once per keyword occurrence
         else:
             for segment_obj in final_processing_segments:
                 for kw, local_img_path_val in downloaded_broll_paths_by_kw.items():
